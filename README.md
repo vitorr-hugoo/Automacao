@@ -1,2 +1,2 @@
-# Automa-o-
+# Automacao
 Matéria de Automação

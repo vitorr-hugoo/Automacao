@@ -1,0 +1,937 @@
+//--------------------------------------------------------------
+// Código projeto automação V_final
+// -------------------------------------------------------------
+// Sistema de monitoramento de paletização de uvas via IHM
+//--------------------------------------------------------------
+// Participantes:
+//		Vitor Hugo Pavanelli dos Reis
+//		Leoanm Rossini
+// 		Beatriz Duran
+// 		Felipe Alves
+//---------------------------------------------------------------
+
+PROGRAM PLC_PRG
+VAR
+    // ========== SENSORES ==========
+    S1 : BOOL := FALSE;          // Sensor fotoelétrico 1 - Posição inicial
+    S2 : BOOL := FALSE;          // Sensor fotoelétrico 2 - Posição de pesagem
+    S3 : BOOL := FALSE;          // Célula de carga (trigger pesagem)
+    S4 : BOOL := FALSE;          // Sensor fotoelétrico 3
+    S5 : BOOL := FALSE;          // Sensor fotoelétrico 4 (subpeso)
+    S6 : BOOL := FALSE;          // Sensor fotoelétrico 5 (sobrepeso)
+    S7 : BOOL := FALSE;          // Sensor fotoelétrico 6 (pos. colorimetria)
+    S8 : BOOL := FALSE;          // Sensor colorimétrico (trigger)
+    S9 : BOOL := FALSE;          // Sensor fotoelétrico 7
+    S10 : BOOL := FALSE;         // Sensor fotoelétrico 8 (final E3)
+    S11 : BOOL := FALSE;         // Sensor fotoelétrico (final amarelas E3)
+    Squeda : BOOL := FALSE;      // Sensor final E2
+    
+    // ========== MOTORES ==========
+    M1 : BOOL := FALSE;          // Motor 1
+    M2 : BOOL := FALSE;          // Motor 2
+    M3 : BOOL := FALSE;          // Motor 3
+    M4 : BOOL := FALSE;          // Motor 4
+    M5 : BOOL := FALSE;          // Motor 5
+    
+    // ========== ALAVANCAS (PISTÕES) ==========
+    A1 : BOOL := FALSE;          // Alavanca 1 (subpeso)
+    A2 : BOOL := FALSE;          // Alavanca 2 (sobrepeso)
+    A3 : BOOL := FALSE;          // Alavanca 3 (cor amarelo)
+    
+    // ========== VARIÁVEIS PARA IHM (ANIMAÇÃO) ==========
+    Angulo_A1 : INT := 0;
+    Angulo_A2 : INT := 0;
+    Angulo_A3 : INT := 0;
+    
+    // Variáveis de Escala
+    Escala_A1 : INT := 0;
+    Escala_A2 : INT := 0;
+    Escala_A3 : INT := 0;
+    
+    // Variáveis para Animação da Caixa (IHM)
+    Box_X : INT := 181; // Inicia na posição de S1
+    Box_Y : INT := 174; // Inicia na posição de S1
+    
+    TempoAtual : DWORD; // Variável auxiliar para animação
+    
+    // Variáveis de Estilo da Caixa
+    Caixa_IsVerde : BOOL := FALSE; // Controla a cor (FALSE=Amarelo, TRUE=Verde)
+    Texto_Peso : STRING := '';     // Texto que vai aparecer dentro da caixa
+    
+    // ========== SINALEIRAS ==========
+    L1 : BOOL := FALSE;          // Sinaleira 1 (vermelho geral)
+    L2 : BOOL := FALSE;          // Sinaleira 2 (C1 - subpeso)
+    L3 : BOOL := FALSE;          // Sinaleira 3 (C2 - sobrepeso)
+    L4 : BOOL := FALSE;          // Sinaleira 4 (vermelho geral)
+    L5 : BOOL := FALSE;          // Sinaleira 5 (C3 - amarelas)
+    L6 : BOOL := FALSE;          // Sinaleira 6 (C4 - verdes/paletização)
+    
+    // ========== CONTADORES ==========
+    C1 : INT := 0;               // Contador subpeso
+    C2 : INT := 0;               // Contador sobrepeso
+    C3 : INT := 0;               // Contador amarelas
+    C4 : INT := 0;               // Contador verdes (paletização)
+    
+    // ========== BOTÕES DE RESET DOS CONTADORES ==========
+    BTN_C1 : BOOL := FALSE;      // Botão reset C1
+    BTN_C2 : BOOL := FALSE;      // Botão reset C2
+    BTN_C3 : BOOL := FALSE;      // Botão reset C3
+    BTN_C4 : BOOL := FALSE;      // Botão reset C4
+    
+    // ========== CONTROLES GERAIS ==========
+    RESET_GERAL : BOOL := FALSE; // Reset geral do sistema
+    PARADA_EMERGENCIA : BOOL := FALSE; // Parada de emergência
+    
+    // ========== VARIÁVEIS DE PROCESSO ==========
+    Peso : INT := 1;             // 0=subpeso, 1=ideal, 2=sobrepeso
+    Cor : INT := 1;              // 0=amarelo, 1=verde
+    
+    // ========== SLIDERS IHM ==========
+    SLIDER_PESO : INT := 1;      // Slider peso (0,1,2)
+    SLIDER_COR : INT := 1;       // Slider cor (0=amarelo, 1=verde)
+    
+    // ========== MÁQUINA DE ESTADOS ==========
+    Estado : INT := 0;
+    PesoMedido : BOOL := FALSE;
+    CorMedida : BOOL := FALSE;
+    
+    // ========== FLAGS AUXILIARES ==========
+    S5_anterior : BOOL := FALSE;
+    S6_anterior : BOOL := FALSE;
+    S10_anterior : BOOL := FALSE;
+    S11_anterior : BOOL := FALSE;
+    
+    SistemaAtivo : BOOL := TRUE;
+    
+    // ========== TEMPORIZADORES ==========
+    TON_S1_S2 : TON;             // Timer S1 -> S2 (2s)
+    TON_S2_S3 : TON;             // Timer S2 -> S3 (4s)
+    TON_S3_S4 : TON;             // Timer S3 -> S4 (2s)
+    TON_S4_Squeda : TON;         // Timer S4 -> Squeda (4s)
+    TON_Squeda_S7 : TON;         // Timer Squeda -> S7 (4s)
+    TON_S7_S8 : TON;             // Timer S7 -> S8 (4s)
+    TON_S8_S9 : TON;             // Timer S8 -> S9 (4s)
+    TON_S9_S10 : TON;            // Timer S9 -> S10 (4s) - Verde
+    TON_S9_S11 : TON;            // Timer S9 -> S11 (4s) - Amarelo
+    TON_S10_OFF : TON;           // Timer desligar S10 (4s)
+    TON_S11_OFF : TON;           // Timer desligar S11 (2s)
+    TON_S4_S5 : TON;             // Timer S4 -> S5 (4s) - Subpeso
+    TON_S4_S6 : TON;             // Timer S4 -> S6 (4s) - Sobrepeso
+    TON_S5_OFF : TON;            // Timer desligar S5 (2s)
+    TON_S6_OFF : TON;            // Timer desligar S6 (2s)
+    
+    Timer_Ativo : BOOL := FALSE;
+END_VAR
+
+// =============================================================
+// BLOCO DE LÓGICA DE CONTROLE
+// =============================================================
+
+// ========== RESET GERAL ==========
+IF RESET_GERAL THEN
+    // Zera todas as variáveis
+    Peso := 1;
+    Cor := 1;
+    PesoMedido := FALSE;
+    CorMedida := FALSE;
+    
+    // Caixa
+    Box_X := 181;
+    Box_Y := 174;
+    
+    // Desliga todos os motores
+    M1 := FALSE;
+    M2 := FALSE;
+    M3 := FALSE;
+    M4 := FALSE;
+    M5 := FALSE;
+    
+    // Desliga todas as alavancas
+    A1 := FALSE;
+    A2 := FALSE;
+    A3 := FALSE;
+    
+    // Angulo alavancas
+    Angulo_A1 := 0;
+    Angulo_A2 := 0;
+    Angulo_A3 := 0;
+    
+    // Escala alavancas
+    Escala_A1 := 0;
+    Escala_A2 := 0;
+    Escala_A3 := 0;
+    
+    // Todas as sinaleiras em vermelho
+    L1 := TRUE;
+    L2 := TRUE;
+    L3 := TRUE;
+    L4 := TRUE;
+    L5 := TRUE;
+    L6 := TRUE;
+    
+    // Reset todos os sensores
+    S1 := FALSE;
+    S2 := FALSE;
+    S3 := FALSE;
+    S4 := FALSE;
+    S5 := FALSE;
+    S6 := FALSE;
+    S7 := FALSE;
+    S8 := FALSE;
+    S9 := FALSE;
+    S10 := FALSE;
+    S11 := FALSE;
+    Squeda := FALSE;
+    
+    S5_anterior := FALSE;
+    S6_anterior := FALSE;
+    S10_anterior := FALSE;
+    S11_anterior := FALSE;
+    
+    // Zera contadores
+    C1 := 0;
+    C2 := 0;
+    C3 := 0;
+    C4 := 0;
+    
+    // Reset timers
+    TON_S1_S2(IN := FALSE);
+    TON_S2_S3(IN := FALSE);
+    TON_S3_S4(IN := FALSE);
+    TON_S4_Squeda(IN := FALSE);
+    TON_Squeda_S7(IN := FALSE);
+    TON_S7_S8(IN := FALSE);
+    TON_S8_S9(IN := FALSE);
+    TON_S9_S10(IN := FALSE);
+    TON_S9_S11(IN := FALSE);
+    TON_S10_OFF(IN := FALSE);
+    TON_S11_OFF(IN := FALSE);
+    TON_S4_S5(IN := FALSE);
+    TON_S4_S6(IN := FALSE);
+    TON_S5_OFF(IN := FALSE);
+    TON_S6_OFF(IN := FALSE);
+    
+    SistemaAtivo := FALSE;
+    Estado := 0;
+    RESET_GERAL := FALSE;
+    RETURN;
+END_IF
+
+// ========== PARADA DE EMERGÊNCIA ==========
+IF PARADA_EMERGENCIA THEN
+    // Desliga todos os motores
+    M1 := FALSE;
+    M2 := FALSE;
+    M3 := FALSE;
+    M4 := FALSE;
+    M5 := FALSE;
+    
+    // Todas as sinaleiras em vermelho
+    L1 := TRUE;
+    L2 := TRUE;
+    L3 := TRUE;
+    L4 := TRUE;
+    L5 := TRUE;
+    L6 := TRUE;
+    
+    // NÃO zera contadores
+    SistemaAtivo := FALSE;
+    Estado := 0;
+    RETURN;
+END_IF
+
+// ========== LÓGICA DAS SINALEIRAS E CONTADORES ==========
+
+// Contador C1 (Subpeso)
+IF C1 >= 5 THEN
+    L1 := TRUE;
+    L4 := TRUE;
+    L2 := TRUE;
+    M1 := FALSE;
+    M2 := FALSE;
+    M3 := FALSE;
+    M4 := FALSE;
+    M5 := FALSE;
+    SistemaAtivo := FALSE;
+    IF BTN_C1 THEN
+        C1 := 0;
+        L2 := FALSE;
+        L1 := FALSE;
+        L4 := FALSE;
+        SistemaAtivo := TRUE;
+        BTN_C1 := FALSE;
+    END_IF
+END_IF
+
+// Contador C2 (Sobrepeso)
+IF C2 >= 5 THEN
+    L1 := TRUE;
+    L4 := TRUE;
+    L3 := TRUE;
+    M1 := FALSE;
+    M2 := FALSE;
+    M3 := FALSE;
+    M4 := FALSE;
+    M5 := FALSE;
+    SistemaAtivo := FALSE;
+    IF BTN_C2 THEN
+        C2 := 0;
+        L3 := FALSE;
+        L1 := FALSE;
+        L4 := FALSE;
+        SistemaAtivo := TRUE;
+        BTN_C2 := FALSE;
+    END_IF
+END_IF
+
+// Contador C3 (Amarelas)
+IF C3 >= 5 THEN
+    L1 := TRUE;
+    L4 := TRUE;
+    L5 := TRUE;
+    M1 := FALSE;
+    M2 := FALSE;
+    M3 := FALSE;
+    M4 := FALSE;
+    M5 := FALSE;
+    SistemaAtivo := FALSE;
+    IF BTN_C3 THEN
+        C3 := 0;
+        L5 := FALSE;
+        L1 := FALSE;
+        L4 := FALSE;
+        SistemaAtivo := TRUE;
+        BTN_C3 := FALSE;
+    END_IF
+END_IF
+
+// Contador C4 (Verdes/Paletização)
+IF C4 >= 5 THEN
+    L1 := TRUE;
+    L4 := TRUE;
+    L6 := TRUE;
+    M1 := FALSE;
+    M2 := FALSE;
+    M3 := FALSE;
+    M4 := FALSE;
+    M5 := FALSE;
+    SistemaAtivo := FALSE;
+    IF BTN_C4 THEN
+        C4 := 0;
+        L6 := FALSE;
+        L1 := FALSE;
+        L4 := FALSE;
+        SistemaAtivo := TRUE;
+        BTN_C4 := FALSE;
+    END_IF
+END_IF
+
+// ========== MÁQUINA DE ESTADOS PRINCIPAL ==========
+IF NOT SistemaAtivo THEN
+    RETURN;
+END_IF
+
+CASE Estado OF
+    
+    // Estado 0: AGUARDANDO OBJETO EM S1
+    0:
+        M1 := FALSE;
+        M2 := FALSE;
+        M3 := FALSE;
+        M4 := FALSE;
+        M5 := FALSE;
+        A1 := FALSE;
+        A2 := FALSE;
+        A3 := FALSE;
+        L1 := FALSE;
+        L2 := FALSE;
+        L3 := FALSE;
+        L4 := FALSE;
+        L5 := FALSE;
+        L6 := FALSE;
+        
+        PesoMedido := FALSE;
+        CorMedida := FALSE;
+        
+        // Reset todos os timers
+        TON_S1_S2(IN := FALSE);
+        TON_S2_S3(IN := FALSE);
+        TON_S3_S4(IN := FALSE);
+        TON_S4_Squeda(IN := FALSE);
+        TON_Squeda_S7(IN := FALSE);
+        TON_S7_S8(IN := FALSE);
+        TON_S8_S9(IN := FALSE);
+        TON_S9_S10(IN := FALSE);
+        TON_S9_S11(IN := FALSE);
+        TON_S10_OFF(IN := FALSE);
+        TON_S11_OFF(IN := FALSE);
+        TON_S4_S5(IN := FALSE);
+        TON_S4_S6(IN := FALSE);
+        TON_S5_OFF(IN := FALSE);
+        TON_S6_OFF(IN := FALSE);
+        
+        IF S1 THEN
+            M1 := TRUE;      // Aciona M1 Primeiro
+            M2 := FALSE;     // Garante M2 desligado
+            TON_S1_S2(IN := FALSE); // Reseta timer para usar no delay
+            Estado := 99;    // Vai para o estado de delay
+        END_IF
+        
+    // Estado 99: DELAY DE 1 SEGUNDO (M1 -> M2)
+    99:
+        TON_S1_S2(IN := TRUE, PT := T#1S);
+        
+        IF TON_S1_S2.Q THEN
+            M2 := TRUE;             // Após 1s, aciona M2
+            TON_S1_S2(IN := FALSE); // Reseta o timer para o próximo estado
+            Estado := 1;            // Segue para a lógica original
+        END_IF
+    
+    // Estado 1: TIMER S1 -> S2 (2 segundos)
+    1:
+        TON_S1_S2(IN := TRUE, PT := T#2S);
+        
+        IF TON_S1_S2.Q THEN
+            S1 := FALSE;
+            S2 := TRUE;
+            TON_S1_S2(IN := FALSE);
+            Estado := 2;
+        END_IF
+    
+	
+    // Estado 2: TIMER S2 -> S3 (Espera na Pesagem)
+    2:
+        M1 := FALSE;
+        M2 := FALSE;
+        
+        TON_S2_S3(IN := TRUE, PT := T#500MS);
+        
+        IF TON_S2_S3.Q THEN
+            S3 := TRUE;   // Aciona célula de carga
+            
+            TON_S2_S3(IN := FALSE);
+            Estado := 3;
+        END_IF
+
+    // Estado 3: PESAGEM EM S3 
+    3:
+        IF NOT PesoMedido THEN
+            Peso := SLIDER_PESO; 
+            PesoMedido := TRUE;
+        END_IF
+        
+        // Tempo Total: 1.5s
+        TON_S3_S4(IN := TRUE, PT := T#1500MS);
+        
+        // Liga o motor aos 500ms
+        IF TON_S3_S4.ET >= T#500MS THEN
+            M2 := TRUE;   // A esteira começa a puxar
+        END_IF
+
+        // Desliga o sensor aos 800ms
+        IF TON_S3_S4.ET >= T#800MS THEN
+            S2 := FALSE; 
+        END_IF
+        
+        IF TON_S3_S4.Q THEN
+            TON_S3_S4(IN := FALSE);
+            Estado := 4; 
+        END_IF
+    
+    // Estado 4: S4 ATINGIDO
+    4:
+        S4 := TRUE;
+        M2 := FALSE;
+        S3 := FALSE;
+        Estado := 5;
+
+    // Estado 5: DECISÃO BASEADA NO PESO
+    5:
+        CASE Peso OF
+            0: Estado := 10; // Rota Subpeso
+            1: Estado := 20; // Rota Peso Ideal
+            2: Estado := 30; // Rota Sobrepeso
+        END_CASE
+    
+    // ========== ROTA SUBPESO (Estados 10-12) ==========
+    
+    // Estado 10: MOVIMENTO S4 -> S5
+    10:
+        A1 := TRUE;
+        M3 := TRUE; 
+        
+        TON_S4_S5(IN := TRUE, PT := T#4S);
+        
+        // Desliga S4 logo no início
+        IF TON_S4_S5.ET >= T#200MS THEN
+            S4 := FALSE;
+        END_IF
+        
+        // Chegou em S5_1 -> Liga S5 e Desliga M3
+        IF TON_S4_S5.ET >= T#1333MS THEN
+            S5 := TRUE;
+            M3 := FALSE; 
+        END_IF
+        
+        // Chegou em S5_2 -> Desliga S5
+        IF TON_S4_S5.ET >= T#2666MS THEN
+            S5 := FALSE;
+        END_IF
+        
+        IF TON_S4_S5.Q THEN
+            TON_S4_S5(IN := FALSE);
+            Estado := 11; 
+        END_IF
+    
+    // Estado 11: CONFIRMAÇÃO DE CHEGADA
+    11:
+        S5 := FALSE;    // Garante S5 desligado
+        M3 := FALSE;    // Garante M3 desligado
+        A1 := TRUE;     // Mantém alavanca
+        Estado := 12;
+
+    // Estado 12: CONTAGEM C1
+    12:
+        A1 := FALSE; // Desliga A1 imediatamente na chegada
+        
+        TON_S5_OFF(IN := TRUE, PT := T#500MS);
+        
+        IF TON_S5_OFF.Q THEN
+            C1 := C1 + 1; // Contabiliza
+            
+            TON_S5_OFF(IN := FALSE);
+            Estado := 0; // Reinicia
+        END_IF;
+    
+    // ========== ROTA PESO IDEAL (Estados 20-27) ==========
+    
+    // Estado 20: ROTA PESO IDEAL (S4 -> Squeda)
+    20:
+        M3 := TRUE; // M3 leva a caixa
+        TON_S4_Squeda(IN := TRUE, PT := T#4S);
+        
+        // Desliga S4 logo no início
+        IF TON_S4_Squeda.ET >= T#200MS THEN
+            S4 := FALSE;
+        END_IF
+        
+        IF TON_S4_Squeda.Q THEN
+            Squeda := TRUE;
+            S4 := FALSE;  // Garante desligado
+            M3 := FALSE;  // Desativa M3
+            M4 := TRUE;   // Ativa M4 para a próxima etapa
+            TON_S4_Squeda(IN := FALSE);
+            Estado := 21;
+        END_IF
+    
+    // Estado 21: TIMER Squeda -> S7
+    21:
+        TON_Squeda_S7(IN := TRUE, PT := T#2S);
+        
+        // Desliga Squeda rápido
+        IF TON_Squeda_S7.ET >= T#400MS THEN
+            Squeda := FALSE;
+        END_IF
+        
+        IF TON_Squeda_S7.Q THEN
+            S7 := TRUE;
+            Squeda := FALSE;
+            M3 := FALSE;
+            M4 := FALSE;  // S7 desativa M4
+            TON_Squeda_S7(IN := FALSE);
+            Estado := 22;
+        END_IF
+    
+    // Estado 22: TIMER S7 -> S8
+    22:
+        TON_S7_S8(IN := TRUE, PT := T#1S);
+        
+        IF TON_S7_S8.Q THEN
+            S8 := TRUE;
+            TON_S7_S8(IN := FALSE);
+            Estado := 23;
+        END_IF
+    
+    // Estado 23: S8 -> S9 (Com Delay M4 e desligamento S7)
+    23:
+        IF NOT CorMedida THEN
+            Cor := SLIDER_COR;
+            CorMedida := TRUE;
+        END_IF
+        
+        TON_S8_S9(IN := TRUE, PT := T#1500MS);
+        
+        // Liga M4 aos 500ms
+        IF TON_S8_S9.ET >= T#500MS THEN
+            M4 := TRUE;
+        END_IF
+        
+        // Desliga S7 aos 800ms
+        IF TON_S8_S9.ET >= T#800MS THEN
+            S7 := FALSE; 
+        END_IF
+        
+        IF TON_S8_S9.Q THEN
+            S9 := TRUE;
+            S8 := FALSE;
+            M4 := FALSE; 
+            TON_S8_S9(IN := FALSE);
+            Estado := 24;
+        END_IF
+    
+    // Estado 24: Decisão baseada na COR
+    24:
+        IF Cor = 1 THEN
+            Estado := 25; // VERDE
+        ELSE
+            Estado := 26; // AMARELO
+        END_IF
+    
+    // Estado 25: ROTA VERDE (S9 -> S10)
+    25:
+        M5 := TRUE; 
+        
+        TON_S9_S10(IN := TRUE, PT := T#4S);
+        
+        // Desliga S9 no início
+        IF TON_S9_S10.ET >= T#200MS THEN
+            S9 := FALSE;
+        END_IF
+        
+        // Liga S10 no meio (2000ms)
+        IF TON_S9_S10.ET >= T#2000MS THEN
+            S10 := TRUE;
+            M5 := FALSE;
+        END_IF
+        
+        // Desliga S10 antes do final (3000ms)
+        IF TON_S9_S10.ET >= T#3000MS THEN
+            S10 := FALSE;
+        END_IF
+        
+        IF TON_S9_S10.Q THEN
+            TON_S9_S10(IN := FALSE);
+            Estado := 27;
+        END_IF
+    
+    // Estado 26: ROTA AMARELO (S9 -> S11)
+    26:
+        A3 := TRUE;     // Ativa o desviador AQUI
+        M5 := TRUE;     // Ativa motor M5
+        
+        TON_S9_S11(IN := TRUE, PT := T#4S);
+        
+        // Desliga S9 no início
+        IF TON_S9_S11.ET >= T#200MS THEN
+            S9 := FALSE;
+        END_IF
+
+        // Liga S11 no meio (1333ms)
+        IF TON_S9_S11.ET >= T#1333MS THEN
+            S11 := TRUE;
+            M5 := FALSE;
+        END_IF
+        
+        // Desliga S11 antes do fim (3600ms)
+        IF TON_S9_S11.ET >= T#3600MS THEN
+            S11 := FALSE;
+        END_IF
+        
+        IF TON_S9_S11.Q THEN
+            TON_S9_S11(IN := FALSE);
+            Estado := 28;
+        END_IF
+    
+    // Estado 27: CHEGADA VERDE E CONTAGEM C4
+    27:
+        S10 := FALSE;   // Garante sensor desligado
+        M5 := FALSE;    // Garante motor desligado
+        A3 := FALSE;    // Garante alavanca fechada
+        
+        TON_S10_OFF(IN := TRUE, PT := T#500MS);
+        
+        IF TON_S10_OFF.Q THEN
+            C4 := C4 + 1; // Contabiliza Verdes
+            
+            TON_S10_OFF(IN := FALSE);
+            Estado := 0; // Reinicia o ciclo
+        END_IF
+    
+    // Estado 28: CHEGADA AMARELO E CONTAGEM C3
+    28:
+        A3 := FALSE;    // Desliga alavanca imediatamente
+        S11 := FALSE;   // Garante sensor desligado
+        M5 := FALSE;
+        
+        TON_S11_OFF(IN := TRUE, PT := T#500MS);
+        
+        IF TON_S11_OFF.Q THEN
+            C3 := C3 + 1; // Contabiliza Amarelas
+            
+            TON_S11_OFF(IN := FALSE);
+            Estado := 0;
+        END_IF
+    
+    // ========== ROTA SOBREPESO (Estados 30-31) ==========
+    
+    // Estado 30: ROTA SOBREPESO (S4 -> S6)
+    30:
+        A2 := TRUE;
+        M3 := TRUE; 
+        
+        TON_S4_S6(IN := TRUE, PT := T#4S);
+        
+        // Desliga S4 no início
+        IF TON_S4_S6.ET >= T#200MS THEN
+            S4 := FALSE;
+        END_IF
+        
+        // Liga S6 no meio (2666ms)
+        IF TON_S4_S6.ET >= T#2666MS THEN
+            S6 := TRUE;
+            M3 := FALSE; 
+        END_IF
+
+        // Desliga S6 antes do fim (3600ms)
+        IF TON_S4_S6.ET >= T#3600MS THEN
+            S6 := FALSE;
+        END_IF
+        
+        IF TON_S4_S6.Q THEN
+            TON_S4_S6(IN := FALSE);
+            Estado := 31; 
+        END_IF
+
+    // Estado 31: CHEGADA E CONTAGEM (Reset Rápido A2)
+    31:
+        S6 := FALSE; 
+        A2 := FALSE; 
+        M3 := FALSE;
+        M2 := FALSE;
+
+        TON_S6_OFF(IN := TRUE, PT := T#500MS);
+        
+        IF TON_S6_OFF.Q THEN
+            C2 := C2 + 1; // Contagem
+            
+            TON_S6_OFF(IN := FALSE);
+            Estado := 0; // Reinicia
+        END_IF
+        
+END_CASE
+
+// =============================================================
+// LÓGICA DE ANIMAÇÃO IHM
+// =============================================================
+
+// ALAVANCA 1
+IF A1 THEN
+    Angulo_A1 := 60;  
+    Escala_A1 := 30;  
+ELSE
+    Angulo_A1 := 0;
+    Escala_A1 := 0;  
+END_IF
+
+// ALAVANCA 2
+IF A2 THEN
+    Angulo_A2 := -60; 
+    Escala_A2 := 30;  
+ELSE
+    Angulo_A2 := 0;
+    Escala_A2 := 0;
+END_IF
+
+// ALAVANCA 3
+IF A3 THEN
+    Angulo_A3 := 60;   
+    Escala_A3 := -40;  
+ELSE
+    Angulo_A3 := 0;    
+    Escala_A3 := 0;
+END_IF
+
+// =============================================================
+// LÓGICA DE MOVIMENTO DA CAIXA
+// =============================================================
+
+CASE Estado OF
+    
+    // Estado 0: Parado no início (S1)
+    0:
+        Box_X := 181;
+        Box_Y := 174;
+
+    // Estado 99: DELAY DE 1 SEGUNDO (M1 ligado)
+    99:
+        Box_X := 181 + REAL_TO_INT(45.0 * (TIME_TO_REAL(TON_S1_S2.ET) / 1000.0));
+        Box_Y := 174;
+
+    // Estado 1: RESTANTE DO CAMINHO S1 -> S2 (2 segundos)
+    1:
+        Box_X := 226 + REAL_TO_INT(133.0 * (TIME_TO_REAL(TON_S1_S2.ET) / 2000.0));
+        Box_Y := 174;
+
+    // Estado 2: S2 (Espera)
+    2:
+        Box_X := 359;
+        Box_Y := 174;
+
+    // Estado 3: S3 -> S4 (1.5s total)
+    3:
+        TempoAtual := TIME_TO_DWORD(TON_S3_S4.ET);
+        
+        // FASE 1: Primeiros 500ms (Esperando motor ligar) -> PARADO
+        IF TempoAtual < 500 THEN
+            Box_X := 359; 
+            Box_Y := 174;
+            
+        // FASE 2: Restante do tempo (1000ms de movimento)
+        ELSE
+            Box_X := 359 + REAL_TO_INT(37.0 * ((DWORD_TO_REAL(TempoAtual) - 500.0) / 1000.0));
+            Box_Y := 174;
+        END_IF
+
+    // Estados 4, 5: Parado em S4 (Decisão)
+    4, 5:
+        Box_X := 396;
+        Box_Y := 174;
+
+    // --- ROTA SUBPESO (S4 -> S5) ---
+    10:
+        TempoAtual := TIME_TO_DWORD(TON_S4_S5.ET);
+        
+        IF TempoAtual <= 1333 THEN
+            // Segmento 1: S4 -> S5_1
+            Box_X := 396 + REAL_TO_INT(128.0 * (DWORD_TO_REAL(TempoAtual) / 1333.0));
+            Box_Y := 174;
+            
+        ELSIF TempoAtual <= 2666 THEN
+            // Segmento 2: S5_1 -> S5_2
+            Box_X := 524 + REAL_TO_INT(20.0 * ((DWORD_TO_REAL(TempoAtual) - 1333.0) / 1333.0));
+            Box_Y := 174 + REAL_TO_INT(28.0 * ((DWORD_TO_REAL(TempoAtual) - 1333.0) / 1333.0));
+            
+        ELSE
+            // Segmento 3: S5_2 -> S5_3
+            Box_X := 544 - REAL_TO_INT(52.0 * ((DWORD_TO_REAL(TempoAtual) - 2666.0) / 1334.0));
+            Box_Y := 202 + REAL_TO_INT(97.0 * ((DWORD_TO_REAL(TempoAtual) - 2666.0) / 1334.0));
+        END_IF
+
+    // Chegou em S5
+    11, 12:
+        Box_X := 492;
+        Box_Y := 299;
+
+    // --- ROTA SOBREPESO (S4 -> S6) ---
+    30:
+        TempoAtual := TIME_TO_DWORD(TON_S4_S6.ET);
+        
+        IF TempoAtual <= 1333 THEN
+            // Seg 1: S4 -> S6_1
+            Box_X := 396 + REAL_TO_INT(307.0 * (DWORD_TO_REAL(TempoAtual) / 1333.0));
+            Box_Y := 174;
+            
+        ELSIF TempoAtual <= 2666 THEN
+            // Seg 2: S6_1 -> S6_2
+            Box_X := 703 + REAL_TO_INT(39.0 * ((DWORD_TO_REAL(TempoAtual) - 1333.0) / 1333.0));
+            Box_Y := 174 - REAL_TO_INT(30.0 * ((DWORD_TO_REAL(TempoAtual) - 1333.0) / 1333.0));
+            
+        ELSE
+            // Seg 3: S6_2 -> S6_3
+            Box_X := 742 + REAL_TO_INT(65.0 * ((DWORD_TO_REAL(TempoAtual) - 2666.0) / 1334.0));
+            Box_Y := 144 - REAL_TO_INT(110.0 * ((DWORD_TO_REAL(TempoAtual) - 2666.0) / 1334.0));
+        END_IF
+
+    // Chegou em S6
+    31:
+        Box_X := 807;
+        Box_Y := 34;
+
+    // --- ROTA PESO IDEAL ---
+    20: // S4 -> Squeda
+        Box_X := 396 + REAL_TO_INT(502.0 * (TIME_TO_REAL(TON_S4_Squeda.ET) / 4000.0));
+        Box_Y := 174;
+    
+    // Estado 21: Squeda -> S7 
+    21:
+        TempoAtual := TIME_TO_DWORD(TON_Squeda_S7.ET);
+        
+        IF TempoAtual <= 750 THEN
+            Box_X := 898 + REAL_TO_INT(90.0 * (DWORD_TO_REAL(TempoAtual) / 750.0));
+            Box_Y := 174;
+        ELSE
+            Box_X := 988 + REAL_TO_INT(26.0 * ((DWORD_TO_REAL(TempoAtual) - 750.0) / 1250.0));
+            Box_Y := 174 + REAL_TO_INT(83.0 * ((DWORD_TO_REAL(TempoAtual) - 750.0) / 1250.0));
+        END_IF
+
+    22: // S7 -> S8
+        Box_X := 1014;
+        Box_Y := 257;
+
+    // Estado 23: S8 -> S9
+    23:
+        TempoAtual := TIME_TO_DWORD(TON_S8_S9.ET);
+        
+        IF TempoAtual < 500 THEN
+            Box_X := 1014;
+            Box_Y := 257;
+        ELSE
+            Box_X := 1014;
+            Box_Y := 257 + REAL_TO_INT(30.0 * ((DWORD_TO_REAL(TempoAtual) - 500.0) / 1000.0));
+        END_IF    
+
+    24: // Parado em S9
+        Box_X := 1014;
+        Box_Y := 287;
+
+    // --- ROTA VERDE (S9 -> S10) ---
+    25:
+        TempoAtual := TIME_TO_DWORD(TON_S9_S10.ET);
+        
+        IF TempoAtual <= 2000 THEN
+            Box_X := 1014 - REAL_TO_INT(2.0 * (DWORD_TO_REAL(TempoAtual) / 2000.0));
+            Box_Y := 287  + REAL_TO_INT(166.0 * (DWORD_TO_REAL(TempoAtual) / 2000.0));
+        ELSE
+            Box_X := 1012 - REAL_TO_INT(56.0 * ((DWORD_TO_REAL(TempoAtual) - 2000.0) / 2000.0));
+            Box_Y := 453  + REAL_TO_INT(96.0 * ((DWORD_TO_REAL(TempoAtual) - 2000.0) / 2000.0));
+        END_IF
+
+    // Fim Verde
+    27:
+        Box_X := 956;
+        Box_Y := 549;
+
+    // --- ROTA AMARELO (S9 -> S11) ---
+    26:
+        TempoAtual := TIME_TO_DWORD(TON_S9_S11.ET);
+        
+        IF TempoAtual <= 1333 THEN
+            Box_X := 1014;
+            Box_Y := 287 + REAL_TO_INT(54.0 * (DWORD_TO_REAL(TempoAtual) / 1333.0));
+            
+        ELSIF TempoAtual <= 2666 THEN
+            Box_X := 1014 - REAL_TO_INT(39.0 * ((DWORD_TO_REAL(TempoAtual) - 1333.0) / 1333.0));
+            Box_Y := 341  + REAL_TO_INT(31.0 * ((DWORD_TO_REAL(TempoAtual) - 1333.0) / 1333.0));
+            
+        ELSE
+            Box_X := 975 - REAL_TO_INT(164.0 * ((DWORD_TO_REAL(TempoAtual) - 2666.0) / 1334.0));
+            Box_Y := 372 + REAL_TO_INT(47.0 * ((DWORD_TO_REAL(TempoAtual) - 2666.0) / 1334.0));
+        END_IF
+
+    // Fim Amarelo
+    28:
+        Box_X := 811;
+        Box_Y := 419;
+
+END_CASE
+
+// =============================================================
+// LÓGICA DE APARÊNCIA DA CAIXA
+// =============================================================
+Caixa_IsVerde := (SLIDER_COR = 1);
+
+CASE SLIDER_PESO OF
+    0: Texto_Peso := 'LEVE';   
+    1: Texto_Peso := 'OK';     
+    2: Texto_Peso := 'PESADO'; 
+END_CASE;

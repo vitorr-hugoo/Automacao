@@ -1,0 +1,31 @@
+# =======================================================
+# .gitignore para Projetos CODESYS / PLC
+# =======================================================
+
+# Arquivos de backup e temporários do CODESYS
+~*.project
+*.bak
+*.tmp
+*.backup
+*.autosave
+
+# Arquivos de compilação e boot
+*.app
+*.crc
+*.compileinfo
+*.ri
+*.bootinfo
+
+# Logs e arquivos de diagnóstico
+*.log
+*.err
+*.csv (apenas se gerados automaticamente pelo sistema)
+
+# Arquivos de configuração de usuário local (opcional)
+*.opt
+*.wsp
+
+# Arquivos do Sistema Operacional (Windows / Mac)
+Thumbs.db
+desktop.ini
+.DS_Store
